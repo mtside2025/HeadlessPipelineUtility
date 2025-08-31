@@ -11,44 +11,19 @@
 import os
 import numpy as np
 import pickle
-
-
-# https://meshcapade.wiki/SMPL#related-models-the-smpl-family
-joint_names_smpl = [
-    "pelvis",
-    "left_hip",
-    "right_hip",
-    "spine1",
-    "left_knee",
-    "right_knee",
-    "spine2",
-    "left_ankle",
-    "right_ankle",
-    "spine3",
-    "left_foot",
-    "right_foot",
-    "neck",
-    "left_collar",
-    "right_collar",
-    "head",
-    "left_shoulder",
-    "right_shoulder",
-    "left_elbow",
-    "right_elbow",
-    "left_wrist",
-    "right_wrist",
-    "left_hand",
-    "right_hand"
-]
-
+import motion_util
 
 
 # load motion-data (.npy or .npz)
-def loadMotion(filepath, joint_names = None):
+def loadMotion(
+    filepath,
+    joint_names = None,
+    joint_rotation_offsets = None
+    ):
     
     _, ext = os.path.splitext(filepath)
     
-    # from .npy (no keys)
+    # from .npy (no keys): numpy(1, frames, joints, 3)
     if ext == ".npy":
         
         if joint_names is None:
@@ -65,18 +40,39 @@ def loadMotion(filepath, joint_names = None):
             dic_data[name] = motion_data[0, :, i, :]
         
     
-    # from .npz (with keys)
+    # from .npz (with keys): dic{keys = joint_names, values = numpy(frames, 3)}
     elif ext == ".npz":
         dic_data = np.load(filepath)
+        if joint_names is None:
+            joint_names = dic_data.keys()
     
     else:
         raise ValueError(f"Invalid file format: {filepath}")
+    
+    
+    # returns as rotation-data when the offsets are specified
+    if joint_rotation_offsets is not None:
+        
+        kinetic_chain = motion_util.getBodyChain(len(dic_data.keys()))
+        
+        dic_data = motion_util.pos2grot(
+            dic_data,
+            kinetic_chain,
+            joint_names
+        )
+        
+        joint_rotation_offset_values = list(joint_rotation_offsets.values())
+        for i, (key, value) in enumerate(dic_data.items()):
+            joint_rotation_offset = np.array(joint_rotation_offset_values[i]).reshape(3)
+            for frame_idx in range(dic_data[key].shape[0]):
+                dic_data[key][frame_idx,:] -= joint_rotation_offset
+        
     
     return dic_data
 
 
 
-# save SMPL data as npz
+# save motion-data as npz
 # motion_data: numpy array (1, #frames, #joints, 3)
 def saveMotion(filepath, motion_data, joint_names):
     
@@ -93,47 +89,3 @@ def saveMotion(filepath, motion_data, joint_names):
     
 
 
-#
-# get kinetic chains as follows:
-#
-# [
-#   [right-lower-body],
-#   [left-lower-body],
-#   [body-axis],
-#   [right-upper-body],
-#   [left-upper-body]
-# ]
-#
-# https://www.researchgate.net/figure/Layout-of-23-joints-in-the-SMPL-models_fig2_351179264
-#
-def getKineticChainSMPL(num_joints):
-
-    if nb_joints == 21:
-        kinetic_chain = [
-            [0, 11, 12, 13, 14, 15],
-            [0, 16, 17, 18, 19, 20],
-            [0, 1, 2, 3, 4],
-            [3, 5, 6, 7],
-            [3, 8, 9, 10]
-        ]
-    elif nb_joints == 22:
-        kinetic_chain = [
-            [0, 2, 5, 8, 11],       # right-lower-body
-            [0, 1, 4, 7, 10],       # left-lower-body
-            [0, 3, 6, 9, 12, 15],   # body-axis
-            [9, 14, 17, 19, 21],    # right-upper-body
-            [9, 13, 16, 18, 20]     # left-upper-body
-        ]
-    elif nb_joints == 24:
-        kinetic_chain = [
-            [0, 2, 5, 8, 11],       # right-lower-body
-            [0, 1, 4, 7, 10],       # left-lower-body
-            [0, 3, 6, 9, 12, 15],   # body-axis
-            [9, 14, 17, 19, 21, 23],    # right-upper-body
-            [9, 13, 16, 18, 20, 22]     # left-upper-body
-        ]
-    else:
-        raise NotImplementedError(f"This jointstype (nb_joints={nb_joints}) is not implemented.")
-        
-    return kinetic_chain
-    

@@ -18,8 +18,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import mpl_toolkits.mplot3d.axes3d as p3
 from textwrap import wrap
 import imageio
-import motion_io
-
+import motion_util
 
 def init():
     ax.set_xlim(-limits, limits)
@@ -129,7 +128,7 @@ def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
     
     nb_joints = joints.shape[1]
     
-    kinetic_chain = motion_io.getKineticChainSMPL(nb_joints)
+    kinetic_chain = motion_util.getBodyChain(nb_joints)
     
     
     limits = 1000 if nb_joints == 21 else 2

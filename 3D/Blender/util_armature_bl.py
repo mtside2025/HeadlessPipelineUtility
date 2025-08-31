@@ -12,18 +12,69 @@ import bpy
 import csv
 import json
 import numpy as np
+import math
 from mathutils import Matrix, Vector, Quaternion, Euler
 
 import sys
 sys.path.append("../Common/Motion")
 import motion_io
+import motion_util
 
 
+#
+# obtain joint-positions at the rest-pose (i.e. T-pose)
+# as dic_data{keys = joint_names, values = numpy(1, 3)}
+#
+def getJointDataAtRestPose(
+    armature,
+    joint_names,
+    rotation = True
+    ):
+    
+    # change to edit-mode to get rest-pose
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # obtain head-position of each-bone
+    dic_data = {}
+    
+    # get each global-joint-position
+    for bone_name in joint_names:
+        bone = armature.data.edit_bones.get(bone_name)
+        if bone is None:
+            print(f"Warning: Bone '{bone_name}' not found.")
+            continue
+        head_world = armature.matrix_world @ bone.head
+        dic_data[bone_name] = np.array([head_world.x, head_world.y, head_world.z]).reshape(1, 3)
+    
+    
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    # change positions to rotations
+    if rotation:
+        
+        kinetic_chain = motion_util.getBodyChain(len(joint_names))
+        
+        dic_data = motion_util.pos2grot(
+            dic_data,
+            kinetic_chain,
+            joint_names
+        )
+    
+    return dic_data
+    
+
+
+
+#
+# set load motion and rigged armature from FBXs, and attach motion to armature as pose-sequence animation
+#
 def setMotion2Armature(
     input_armature_fbx_path,
     input_motion_path,
     output_armature_fbx_path,
-    joint_names = None,
+    armature_joint_names,
+    motion_joint_names,
     retarget_table_path = None,
     armature_name = "Armature",
     rename_bones_to_search = True,
@@ -73,11 +124,15 @@ def setMotion2Armature(
             #    action.fcurves.remove(fcurve)
             bpy.data.actions.remove(action)
         
+        # get joint-positions of rest-pose
+        dic_joint_rotations_rest_pose = getJointDataAtRestPose(armature, armature_joint_names)
+        
         
         # load motion-file (.npz)
         motion_data = motion_io.loadMotion(
             input_motion_path,
-            joint_names = joint_names
+            joint_names = motion_joint_names,
+            joint_rotation_offsets = dic_joint_rotations_rest_pose
             )
         
         if verbose:
@@ -90,8 +145,18 @@ def setMotion2Armature(
             rt_tbl = json.load(f)
         
         
+        
+        for i, pose_bone in enumerate(armature.pose.bones):
+            pose_bone.rotation_mode = 'XYZ'
+            pose_bone.rotation_euler = Euler([0, 0, 0], 'XYZ')
+        
+        
         # set motion to armature
         for i, (target, source) in enumerate(rt_tbl.items()):
+            
+            # root
+            if i == 0:
+                continue # location is to be implemented
             
             print(f"[{i+1}/{len(rt_tbl.items())}] {source} to {target}", flush=True)
             
@@ -112,7 +177,6 @@ def setMotion2Armature(
                 bpy.context.scene.frame_set(frame_idx + 1)
                 
                 euler_angles = motion[frame_idx]  # [x, y, z] in radians
-                pose_bone.rotation_mode = 'XYZ'
                 pose_bone.rotation_euler = Euler(euler_angles, 'XYZ')
                 pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame_idx + 1)
                 
@@ -157,7 +221,8 @@ if __name__ == "__main__":
         "G:/3d/humanoid/Mixamo/medea.fbx",
         "../Common/Motion/motion_smpl_sample.npy",
         "G:/3d/animation/generated/medea_animated.fbx",
-        joint_names = motion_io.joint_names_smpl,
+        armature_joint_names = motion_util.joint_names_mixamo,
+        motion_joint_names = motion_util.joint_names_smpl,
         retarget_table_path = "../Common/Motion/retarget_table/smpl_to_mixamo.json"
     )
     
