@@ -15,7 +15,7 @@ import motion_util
 
 
 # load motion-data (.npy or .npz)
-def loadMotion(
+def loadNPMotion(
     filepath,
     joint_names = None,
     joint_rotation_offsets = None
@@ -74,7 +74,7 @@ def loadMotion(
 
 # save motion-data as npz
 # motion_data: numpy array (1, #frames, #joints, 3)
-def saveMotion(filepath, motion_data, joint_names):
+def saveNPMotion(filepath, motion_data, joint_names):
     
     _, ext = os.path.splitext(filepath)
     if ext != ".npz":

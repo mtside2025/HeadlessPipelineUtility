@@ -9,6 +9,7 @@
 # limitations under the License.
 
 import bpy
+import os
 import csv
 import json
 import numpy as np
@@ -21,48 +22,52 @@ import motion_io
 import motion_util
 
 
-#
-# obtain joint-positions at the rest-pose (i.e. T-pose)
-# as dic_data{keys = joint_names, values = numpy(1, 3)}
-#
-def getJointDataAtRestPose(
-    armature,
-    joint_names,
-    rotation = True
-    ):
+# convert FBX-motion to BVH
+def fbx2bvh(
+    fbx_path,
+    bvh_path
+):
+
+    # create temporary scene for the load
+    temp_scene = bpy.data.scenes.new("TempScene")
+    original_scene = bpy.context.window.scene
+    bpy.context.window.scene = temp_scene
     
-    # change to edit-mode to get rest-pose
-    bpy.context.view_layer.objects.active = armature
-    bpy.ops.object.mode_set(mode='EDIT')
-    
-    # obtain head-position of each-bone
-    dic_data = {}
-    
-    # get each global-joint-position
-    for bone_name in joint_names:
-        bone = armature.data.edit_bones.get(bone_name)
-        if bone is None:
-            print(f"Warning: Bone '{bone_name}' not found.")
-            continue
-        head_world = armature.matrix_world @ bone.head
-        dic_data[bone_name] = np.array([head_world.x, head_world.y, head_world.z]).reshape(1, 3)
-    
-    
-    bpy.ops.object.mode_set(mode='POSE')
-    
-    # change positions to rotations
-    if rotation:
+    try:
+        # load FBX
+        bpy.ops.import_scene.fbx(filepath=fbx_path)
         
-        kinetic_chain = motion_util.getBodyChain(len(joint_names))
+        # search armature
+        armature = None
+        for obj in bpy.context.scene.objects:
+            if obj.type == 'ARMATURE':
+                armature = obj
+                break
+            
+        if armature is None:
+            print(f"No-armature exist in {fbx_path}. The scene includes:")
+            for obj in  bpy.data.objects:
+                print(obj.name)
+            raise AttributeError()
         
-        dic_data = motion_util.pos2grot(
-            dic_data,
-            kinetic_chain,
-            joint_names
-        )
+        # set armature active
+        bpy.context.view_layer.objects.active = armature
+        armature.select_set(True)
+        
+        # export as BVH-format
+        bpy.ops.export_anim.bvh(
+            filepath=bvh_path,
+            frame_start=1,
+            frame_end=bpy.context.scene.frame_end
+            )
     
-    return dic_data
     
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # recover original scene and remove temporary one
+        bpy.context.window.scene = original_scene
+        bpy.data.scenes.remove(temp_scene)
 
 
 
@@ -123,9 +128,6 @@ def setMotion2Armature(
             #for fcurve in action.fcurves:
             #    action.fcurves.remove(fcurve)
             bpy.data.actions.remove(action)
-        
-        # get joint-positions of rest-pose
-        dic_joint_rotations_rest_pose = getJointDataAtRestPose(armature, armature_joint_names)
         
         
         # load motion-file (.npz)
@@ -214,9 +216,111 @@ def setMotion2Armature(
 
 
 
+#
+# obtain joint euler-rotations at the rest-pose (i.e. T-pose)
+# as dic_data{keys = joint_names, values = numpy(1, 3)}
+#
+def getJointRotationsAtRestPose(
+    armature,
+    joint_names,
+    axis_vector = [0, 1, 0], # [0, 1, 0]: Y-up, [0, 0, 1]: Z-up
+    dump_path = ""
+    ):
+    
+    # change to edit-mode to get rest-pose
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # obtain head-position of each-bone
+    dic_data = {}
+    
+    # get each global-joint-position
+    for bone_name in joint_names:
+        bone = armature.data.edit_bones.get(bone_name)
+        if bone is None:
+            print(f"Warning: Bone '{bone_name}' not found.")
+            continue
+            
+        direction = (bone.tail - bone.head).normalized()
+        reference = Vector(axis_vector)
+        rotation_matrix = reference.rotation_difference(direction).to_matrix().to_4x4()
+        rotation_euler = rotation_matrix.to_euler('XYZ')
+        
+        dic_data[bone_name] = np.array([
+            rotation_euler.x,
+            rotation_euler.y,
+            rotation_euler.z
+        ]).reshape(1, 3)
+    
+    
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    
+    if dump_path != "":
+        with open(dump_path, "w") as f:
+            f.write("{")
+            for key, data in dic_data.items():
+                rotx = round(data[0,0] / math.pi * 180.0)
+                roty = round(data[0,1] / math.pi * 180.0)
+                rotz = round(data[0,2] / math.pi * 180.0)
+                f.write(f"    \"{key}\":\t[{rotx:4d}, {roty:4d}, {rotz:4d}]\n")
+            f.write("}")
+    
+    return dic_data
+    
+
+
+
+#
+# obtain joint-positions at the rest-pose (i.e. T-pose)
+# as dic_data{keys = joint_names, values = numpy(1, 3)}
+#
+def getJointPositionsAtRestPose(
+    armature,
+    joint_names,
+    dump_path = ""
+    ):
+    
+    # change to edit-mode to get rest-pose
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # obtain head-position of each-bone
+    dic_data = {}
+    
+    # get each global-joint-position
+    for bone_name in joint_names:
+        bone = armature.data.edit_bones.get(bone_name)
+        if bone is None:
+            print(f"Warning: Bone '{bone_name}' not found.")
+            continue
+        head_world = armature.matrix_world @ bone.head
+        dic_data[bone_name] = np.array([head_world.x, head_world.y, head_world.z]).reshape(1, 3)
+    
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    if dump_path != "":
+        with open(dump_path, "w") as f:
+            f.write("{")
+            for key, data in dic_data.items():
+                f.write(f"    \"{key}\":\t[{data[0,0]}, {data[0,1]}, {data[0,2]}]\n")
+            f.write("}")
+    
+    return dic_data
+    
+
+
+
 
 if __name__ == "__main__":
     
+    fbx2bvh(
+        "G:/3d/animation/general/Walking.fbx",
+        "G:/3d/animation/general/Walking.bvh"
+    )
+    
+    
+    """
     setMotion2Armature(
         "G:/3d/humanoid/Mixamo/medea.fbx",
         "../Common/Motion/motion_smpl_sample.npy",
@@ -225,4 +329,5 @@ if __name__ == "__main__":
         motion_joint_names = motion_util.joint_names_smpl,
         retarget_table_path = "../Common/Motion/retarget_table/smpl_to_mixamo.json"
     )
+    """
     
