@@ -10,7 +10,6 @@
 
 import bpy
 import os
-import csv
 import json
 import numpy as np
 import math
@@ -20,55 +19,6 @@ import sys
 sys.path.append("../Common/Motion")
 import motion_io
 import motion_util
-
-
-# convert FBX-motion to BVH
-def fbx2bvh(
-    fbx_path,
-    bvh_path
-):
-
-    # create temporary scene for the load
-    temp_scene = bpy.data.scenes.new("TempScene")
-    original_scene = bpy.context.window.scene
-    bpy.context.window.scene = temp_scene
-    
-    try:
-        # load FBX
-        bpy.ops.import_scene.fbx(filepath=fbx_path)
-        
-        # search armature
-        armature = None
-        for obj in bpy.context.scene.objects:
-            if obj.type == 'ARMATURE':
-                armature = obj
-                break
-            
-        if armature is None:
-            print(f"No-armature exist in {fbx_path}. The scene includes:")
-            for obj in  bpy.data.objects:
-                print(obj.name)
-            raise AttributeError()
-        
-        # set armature active
-        bpy.context.view_layer.objects.active = armature
-        armature.select_set(True)
-        
-        # export as BVH-format
-        bpy.ops.export_anim.bvh(
-            filepath=bvh_path,
-            frame_start=1,
-            frame_end=bpy.context.scene.frame_end
-            )
-    
-    
-    finally:
-        bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # recover original scene and remove temporary one
-        bpy.context.window.scene = original_scene
-        bpy.data.scenes.remove(temp_scene)
-
 
 
 #
@@ -314,13 +264,6 @@ def getJointPositionsAtRestPose(
 
 if __name__ == "__main__":
     
-    fbx2bvh(
-        "G:/3d/animation/general/Walking.fbx",
-        "G:/3d/animation/general/Walking.bvh"
-    )
-    
-    
-    """
     setMotion2Armature(
         "G:/3d/humanoid/Mixamo/medea.fbx",
         "../Common/Motion/motion_smpl_sample.npy",
@@ -329,5 +272,4 @@ if __name__ == "__main__":
         motion_joint_names = motion_util.joint_names_smpl,
         retarget_table_path = "../Common/Motion/retarget_table/smpl_to_mixamo.json"
     )
-    """
     
