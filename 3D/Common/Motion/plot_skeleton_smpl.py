@@ -20,7 +20,7 @@ from textwrap import wrap
 import imageio
 import motion_util
 
-def init():
+def init(ax, limits):
     ax.set_xlim(-limits, limits)
     ax.set_ylim(-limits, limits)
     ax.set_zlim(0, limits)
@@ -28,7 +28,7 @@ def init():
     
 
 
-def plot_xzPlane(minx, maxx, miny, minz, maxz):
+def plot_xzPlane(ax, minx, maxx, miny, minz, maxz):
     ## Plot a plane XZ
     verts = [
         [minx, miny, minz],
@@ -42,7 +42,7 @@ def plot_xzPlane(minx, maxx, miny, minz, maxz):
     
 
 
-def update(index, trajec, kinetic_chain):
+def update(index, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, colors, data, out_name):
 
     fig = plt.figure(figsize=(480/96., 320/96.), dpi=96) if nb_joints == 21 else plt.figure(figsize=(10, 10), dpi=96)
     if title is not None :
@@ -57,12 +57,13 @@ def update(index, trajec, kinetic_chain):
     
     
     ax.cla()
-    init()
+    init(ax, limits)
     
     ax.view_init(elev=110, azim=-90)
     ax.dist = 7.5
     #         ax =
     plot_xzPlane(
+        ax,
         MINS[0] - trajec[index, 0],
         MAXS[0] - trajec[index, 0],
         0,
@@ -128,7 +129,7 @@ def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
     
     nb_joints = joints.shape[1]
     
-    kinetic_chain = motion_util.getBodyChain(nb_joints)
+    kinetic_chain = motion_util.getJointChains(nb_joints)
     
     
     limits = 1000 if nb_joints == 21 else 2
@@ -150,7 +151,7 @@ def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
 
     out = []
     for i in range(frame_number) : 
-        out.append(update(i, trajec))
+        out.append(update(i, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, colors, data, out_name))
     out = np.stack(out, axis=0)
     return torch.from_numpy(out)
 
@@ -162,9 +163,10 @@ def draw_to_batch(smpl_joints_batch, title_batch=None, outname=None) :
     for i in range(batch_size) : 
         out.append(
             plot_3d_motion(
-                [smpl_joints_batch[i],
-                None,
-                title_batch[i] if title_batch is not None else None
+                [
+                    smpl_joints_batch[i],
+                    None,
+                    title_batch[i] if title_batch is not None else None
                 ]
             )
         )

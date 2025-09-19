@@ -67,6 +67,8 @@ def _writeChildChains(
     joint_chains,
     joint_names,
     joint_order,
+    outputPosition,
+    outputRotation,
     rotation_order,
     base_indent
 ):
@@ -88,8 +90,13 @@ def _writeChildChains(
             joint_pos = data_pos[0, joint_idx] - data_pos[0, 0]
             indent = base_indent * (indent_depth + j)
             file.write(f"{indent}OFFSET {joint_pos[0]} {joint_pos[1]} {joint_pos[2]}\n")
-            file.write(f"{indent}CHANNELS 6 Xposition Yposition Zposition {rotation_order[0]}rotation {rotation_order[1]}rotation {rotation_order[2]}rotation\n\n")
             
+            if outputPosition and outputRotation:
+                file.write(f"{indent}CHANNELS 6 Xposition Yposition Zposition {rotation_order[0]}rotation {rotation_order[1]}rotation {rotation_order[2]}rotation\n\n")
+            elif outputPosition:
+                file.write(f"{indent}CHANNELS 3 Xposition Yposition Zposition\n\n")
+            else:
+                file.write(f"{indent}CHANNELS 3 {rotation_order[0]}rotation {rotation_order[1]}rotation {rotation_order[2]}rotation\n\n")
             
             # write hierarchy recursively
             _writeChildChains(
@@ -99,13 +106,20 @@ def _writeChildChains(
                 joint_chains[i+1:],
                 joint_names,
                 joint_order,
+                outputPosition,
+                outputRotation,
                 rotation_order,
                 base_indent
             )
             
         
         indent = base_indent * (indent_depth + len(chain)-1)
-        file.write(f"{indent}End Site {{OFFSET 0 0 0}}\n")
+        file.write(f"{indent}End Site\n")
+        file.write(f"{indent}{{\n")
+        indent = base_indent * (indent_depth + len(chain))
+        file.write(f"{indent}OFFSET 0 0 0\n")
+        indent = base_indent * (indent_depth + len(chain)-1)
+        file.write(f"{indent}}}\n")
         
         
         for j in range(len(chain) - 1, 0, -1):
@@ -122,10 +136,14 @@ def exportToBvh(
     data_pos,
     data_rot,
     joint_names,
+    outputPosition=False,
+    outputRotation=True,
     rotation_order="ZXY",
     frame_time=1/30.0,
     base_indent="    "
     ):
+    
+    assert(outputPosition or outputRotation)
     
     frames, joints, _ = data_pos.shape
     joint_chains = motion_util.getJointChains(joints)
@@ -155,6 +173,8 @@ def exportToBvh(
             joint_chains,
             joint_names,
             joint_order,
+            outputPosition,
+            outputRotation,
             rotation_order,
             base_indent
         )
@@ -162,11 +182,12 @@ def exportToBvh(
         f.write("}\n")
         
         
+        
         #
         # Write motion data
         #
         
-        f.write("MOTION\n")
+        f.write("\nMOTION\n")
         f.write(f"Frames: {frames}\n")
         f.write(f"Frame Time: {frame_time:.6f}\n")
         
@@ -179,16 +200,21 @@ def exportToBvh(
         for f_idx in range(frames):
             line = []
             for j in joint_order:
-                if j == 0:
-                    pos = data_pos[f_idx, j]
-                else:
-                    pos = data_pos[f_idx, j] - data_pos[f_idx, 0]
                     
-                line.extend([f"{p:.6f}" for p in pos])
+                if j == 0 or outputPosition:
+                    if j == 0:
+                        pos = data_pos[f_idx, j]
+                    else:
+                        pos = data_pos[f_idx, j] - data_pos[f_idx, 0]
+                    line.extend([f"{p:.6f}" for p in pos])
                 
-                for rot_order in rotation_order_index:
-                    rot = data_rot[f_idx, j, rot_order]
-                    line.append(f"{rot:.6f}")
+                if j == 0 or outputRotation:
+                    for rot_order in rotation_order_index:
+                        rot = data_rot[f_idx, j, rot_order]
+                        line.append(f"{rot:.6f}")
+                
+            if f_idx == 0:
+                print(f"{filename}: {len(line)} motion-data of {len(joint_order)} joints per frame (totally {frames} frames) are being exported.")
                 
             f.write(" ".join(line) + "\n")
 
