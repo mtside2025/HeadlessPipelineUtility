@@ -10,6 +10,7 @@
 
 import os
 import numpy as np
+from mathutils import Matrix, Vector, Quaternion, Euler
 from scipy.spatial.transform import Rotation as R
 
 
@@ -84,10 +85,10 @@ joint_names_mixamo = [
 #
 # https://www.researchgate.net/figure/Layout-of-23-joints-in-the-SMPL-models_fig2_351179264
 #
-def getBodyChain(num_joints):
+def getJointChains(num_joints):
 
     if num_joints == 21:
-        kinetic_chain = [
+        joint_chains = [
             [0, 11, 12, 13, 14, 15],
             [0, 16, 17, 18, 19, 20],
             [0, 1, 2, 3, 4],
@@ -95,7 +96,7 @@ def getBodyChain(num_joints):
             [3, 8, 9, 10]
         ]
     elif num_joints == 22:
-        kinetic_chain = [
+        joint_chains = [
             [0, 2, 5, 8, 11],       # right-lower-body
             [0, 1, 4, 7, 10],       # left-lower-body
             [0, 3, 6, 9, 12, 15],   # body-axis
@@ -103,7 +104,7 @@ def getBodyChain(num_joints):
             [9, 13, 16, 18, 20]     # left-upper-body
         ]
     elif num_joints == 24:
-        kinetic_chain = [
+        joint_chains = [
             [0, 2, 5, 8, 11],       # right-lower-body
             [0, 1, 4, 7, 10],       # left-lower-body
             [0, 3, 6, 9, 12, 15],   # body-axis
@@ -113,50 +114,54 @@ def getBodyChain(num_joints):
     else:
         raise NotImplementedError(f"This joint-type (num_joints={num_joints}) is not implemented.")
         
-    return kinetic_chain
+    return joint_chains
     
 
 
 
 #
 # convert posiotional data to global rotation data
+# input-data format: ndarray(frames, joints, 3)
 #
-def pos2grot (
-    dic_data_pos,
-    kinetic_chain,
-    joint_names
+def pos2rot (
+    data_pos,
+    axis_vector = [0, 1, 0], # [0, 1, 0]: Y-up, [0, 0, 1]: Z-up
+    is_local_rotation = False # to-local to be implemented
     ):
     
-    num_frames = len(list(dic_data_pos.values())[0])
-    dic_data_rot = dic_data_pos.copy()
+    frames, joints, _ = data_pos.shape
+    joint_chains = getJointChains(joints)
     
-    for chain in kinetic_chain:
-        
-        for frame_idx in range(num_frames):
-            
-            ref_direction = [0, 1, 0] # initial direction of reference
-            
+    data_rot = np.zeros(data_pos.shape)
+    
+    for frame_idx in range(data_pos.shape[0]):
+        for chain in joint_chains:
             for joint_idx in range(1, len(chain)):
                 
-                pos_data = dic_data_pos[joint_names[joint_idx]] # numpy(frames, 3)
-                pos = pos_data[frame_idx, :]
-                
-                parent_pos_data = dic_data_pos[joint_names[joint_idx-1]] # numpy(frames, 3)
-                parent_pos = parent_pos_data[frame_idx, :]
+                pos_xyz        = data_pos[frame_idx, joint_idx, :]
+                parent_pos_xyz = data_pos[frame_idx, joint_idx-1, :]
                 
                 direction = pos - parent_pos
+                reference = Vector(axis_vector)
                 
                 # compute difference from reference-direction
-                rot, _ = R.align_vectors([direction], [ref_direction])
+                rotation_matrix = reference.rotation_difference(direction).to_matrix().to_4x4()
+                data_rot[frame_idx, joint_idx, :] = rotation_matrix.to_euler('XYZ')
                 
-                rot_data = dic_data_rot[joint_names[joint_idx]] # numpy(frames, 3)
-                rot_data[frame_idx, :] = rot.as_euler('XYZ', degrees=False)
+                """
+                rot, _ = R.align_vectors([direction], [axis_vector])
+                data_rot[frame_idx, joint_idx, :] = rot.as_euler('XYZ', degrees=False)
+                """
                 
                 # update reference direction
-                ref_direction = direction
+                if is_local_rotation:
+                    if joint_idx != 0:
+                        axis_vector = direction
+                    else:
+                        raise NotImplementedError("Axis-vector of root-joints of each chain must be considered.")
             
         
-    return dic_data_rot
+    return data_rot
     
 
 
