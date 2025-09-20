@@ -11,133 +11,161 @@
 import os
 import numpy as np
 import pickle
-import motion_util
-import numpy as np
-from scipy.spatial.transform import Rotation as R
+import skeleton_util
+from pos2rotation import pos2rot
 
 
-#
-# convert posiotional data to global rotation data
-# input-data format: ndarray(joints, 3)
-#
-def computeGlobalRotations (
-    global_positions, # ndarray(joints, 3)
-    is_euler = False, # True: Euler, False: Quaternion
-    rotaton_order = "XYZ", # only for euler-angle
-    is_degree = True,      # only for euler-angle
-    frontal_direction = [0, 0, -1] # frontal direction of loaded skeleton
-    ):
-    
-    joints, _ = global_positions.shape
-    joint_chains = motion_util.getJointChains(joints)
-    
-    if is_euler:
-        global_rotations = np.zeros(global_positions.shape)
-    else:
-        global_rotations = np.zeros((global_positions.shape[0], 4)) # quaternion
-        global_rotations[:,3] = 1.0
-    
-    for chain in joint_chains:
-        for i in range(1, len(chain)):
-            joint_idx = chain[i]
-            parent_idx = chain[i-1]
-            pos        = global_positions[joint_idx, :]
-            parent_pos = global_positions[parent_idx, :]
-            vec        = pos - parent_pos
-            
-            # compute angle from frontal-direction
-            rot = R.align_vectors([vec], [frontal_direction])[0] # (target, source)
-            
-            if is_euler:
-                global_rotations[joint_idx, :] = rot.as_euler(rotation_order, degrees=is_degree)
-            else:
-                global_rotations[joint_idx, :] = rot.as_quat()
-            
-        
-    return global_rotations
-    
-
-#
-# compute rotation-differences between quaternion ndarrays
-# input-data format: ndarray(num, 4)
-#
-def computeRotationDifference(
-    quats_target,
-    quats_source,
-    is_euler = False, # True: Euler, False: Quaternion
-    rotation_order = "XYZ", # only for euler-angle
-    is_degree = True       # only for euler-angle
-    ):
-    
-    num = quats_target.shape[0]
-    assert(num == quats_source.shape[0])
-    
-    if is_euler:
-        output_delta = np.zeros((num, 3)) # output as euler
-    else:
-        output_delta = np.zeros((num, 4)) # output as quaternion
-        output_delta[:,3] = 1.0
-    
-    
-    for i in range(num):
-        # convert to rotation-object
-        rot_src = R.from_quat(quats_source[i])
-        rot_tgt = R.from_quat(quats_target[i])
-
-        # align source to target
-        delta_rot = rot_src.inv() * rot_tgt
-
-        # convert to rotation-angle
-        if is_euler:
-            output_delta[i] = delta_rot.as_euler(rotation_order, degrees=is_degree)
-        else:
-            output_delta[i] = delta_rot.as_quat()
-    
-    return output_delta
-    
-
-
-#
-# convert posiotional data to local rotation-euler data from the 1st frame pose
-# input-data format: ndarray(frames, joints, 3)
-#
-def pos2rot(
-    data_pos,                # ndarray(frames, joints, 3)
+# load positional motion-data (.npy) as list of ndarray(frames, joints, 3) and compute corresponding rotations
+def loadPositionalMotions(
+    filepath,
     rotation_order="XYZ"
-     ):
-     
-    frames, joints, _ = data_pos.shape
-    joint_chains = motion_util.getJointChains(joints)
+    ):
     
-    # compute global-rotation angles of the 1st frame
-    initial_global_rotations = computeGlobalRotations(data_pos[0,:,:]) # compute as quaternion
+    _, ext = os.path.splitext(filepath)
     
-    
-    # compute local-rotation angles from the 1st frame
-    data_rot = np.zeros(data_pos.shape)
-    for f in range(1, frames):
-        global_rotations = computeGlobalRotations(data_pos[f,:,:]) # compute as quaternion
-        data_rot[f,:,:] = computeRotationDifference(
-            global_rotations,
-            initial_global_rotations,
-            is_euler = True,
-            rotation_order = rotation_order,
-            is_degree = True
-            )
+    if ext == ".npy":
         
-        """
-        debug_joint_index = 4
-        print("Local: (", end="")
-        for i, r in enumerate(data_rot[f, debug_joint_index, :]):
-            print(f"{r:.1f}", end="")
-            if i != 2:
-                print(",\t", end="")
+        motion_data = np.load(filepath, allow_pickle=True)
+        if motion_data.size == 1:
+            motion_data = motion_data.item()
+        
+        # dict{"motion", "text", ..."}
+        if isinstance(motion_data, dict):
+            print(f"\"{filepath}\" is loaded. Following keys exist:")
+            for key in motion_data:
+                print(key)
+                
+            data_pos = motion_data["motion"]
+            print(f"Shape of motion-data: {motion_data.shape}") # ndarray(N, joints, 3, frames)
             
-        print(")")
-        """
+            ##
+            ## TODO: 次元の入れ替え
+            ##
+            
+        
+        # ndarray(N, frames, joints, 3)
+        elif isinstance(motion_data, np.ndarray):
+            print(f"\"{filepath}\" is loaded. The shape = {motion_data.shape}")
+            data_pos = motion_data
+            
+            
+        # others
+        else:
+            print(motion_data)
+            raise ValueError(f"{filepath} is invalid format.")
+            
+        
+    elif ext == ".npz":
+        raise NotImplementedError(f"Invalid file format: {filepath}")
+    
+    else:
+        raise ValueError(f"Invalid file format: {filepath}")
+    
+    
+    data_pos_list = []
+    data_rot_list = []
+    
+    for i in range(data_pos.shape[0]):
+        data_rot = pos2rot(data_pos[i], rotation_order)
+        data_pos_list.append(data_pos[i])
+        data_rot_list.append(data_rot)
+    
+    return data_pos_list, data_rot_list
+
+
+
+
+
+
+def exportToBvh(
+    filename,
+    data_pos,
+    data_rot,
+    joint_names,
+    rotation_order,
+    outputPosition=True,
+    outputRotation=True,
+    frame_time=1/30.0,
+    base_indent="    "
+    ):
+    
+    assert(outputPosition or outputRotation)
+    
+    frames, joints, _ = data_pos.shape
+    joint_chains = skeleton_util.getJointChains(joints)
+    
+    data_pos *= 100.0 # m -> cm
+    
+    with open(filename, 'w') as f:
+        
+        #
+        # Write BVH hierarchy
+        #
+        
+        f.write("HIERARCHY\n")
+        f.write(f"ROOT {joint_names[0]}\n") # joint[0] must be ROOT
+        f.write("{\n")
+        
+        # set root-position as OFFSET from 1st-frame
+        root_pos = data_pos[0, 0]
+        f.write(f"{base_indent}OFFSET {root_pos[0]} {root_pos[1]} {root_pos[2]}\n")
+        f.write(f"{base_indent}CHANNELS 6 Xposition Yposition Zposition {rotation_order[0]}rotation {rotation_order[1]}rotation {rotation_order[2]}rotation\n\n")
         
         
-    return data_rot
+        # write hierarchy of each joint and save the order as list
+        joint_order = [0]
+        parent_order = [-1]
+        _writeChildChains(
+            f,
+            0, # parent_index (root)
+            1, # indent_depth
+            joint_chains,
+            joint_names,
+            joint_order,
+            parent_order,
+            outputPosition,
+            outputRotation,
+            rotation_order,
+            base_indent
+        )
+        
+        f.write("}\n")
+        
+        
+        #
+        # Write motion data
+        #
+        
+        f.write("\nMOTION\n")
+        f.write(f"Frames: {frames}\n")
+        f.write(f"Frame Time: {frame_time:.6f}\n")
+        
+        rotation_order_index = [
+            ord(rotation_order[0]) - ord('X'),
+            ord(rotation_order[1]) - ord('X'),
+            ord(rotation_order[2]) - ord('X')
+        ]
+        
+        for f_idx in range(frames):
+            line = []
+            for i, j in enumerate(joint_order):
+                    
+                if j == 0 or outputPosition:
+                    if j == 0:
+                        pos = data_pos[f_idx, j]
+                    else:
+                        pos = data_pos[f_idx, j] - data_pos[f_idx, parent_order[i]]
+                    line.extend([f"{p:.6f}" for p in pos])
+                
+                if j == 0 or outputRotation:
+                    for rot_order in rotation_order_index:
+                        rot = data_rot[f_idx, j, rot_order]
+                        line.append(f"{rot:.6f}")
+                
+            if f_idx == 0:
+                print(f"{filename}: {len(line)} motion-data of {len(joint_order)} joints per frame (totally {frames} frames) are being exported.")
+                
+            f.write(" ".join(line) + "\n")
 
 
 
@@ -216,157 +244,6 @@ def _writeChildChains(
 
 
 
-def exportToBvh(
-    filename,
-    data_pos,
-    data_rot,
-    joint_names,
-    rotation_order,
-    outputPosition=False,
-    outputRotation=True,
-    frame_time=1/30.0,
-    base_indent="    "
-    ):
-    
-    assert(outputPosition or outputRotation)
-    
-    frames, joints, _ = data_pos.shape
-    joint_chains = motion_util.getJointChains(joints)
-    
-    data_pos *= 100.0 # m -> cm
-    
-    with open(filename, 'w') as f:
-        
-        #
-        # Write BVH hierarchy
-        #
-        
-        f.write("HIERARCHY\n")
-        f.write(f"ROOT {joint_names[0]}\n") # joint[0] must be ROOT
-        f.write("{\n")
-        
-        # set root-position as OFFSET from 1st-frame
-        root_pos = data_pos[0, 0]
-        f.write(f"{base_indent}OFFSET {root_pos[0]} {root_pos[1]} {root_pos[2]}\n")
-        f.write(f"{base_indent}CHANNELS 6 Xposition Yposition Zposition {rotation_order[0]}rotation {rotation_order[1]}rotation {rotation_order[2]}rotation\n\n")
-        
-        
-        # write hierarchy of each joint and save the order as list
-        joint_order = [0]
-        parent_order = [-1]
-        _writeChildChains(
-            f,
-            0, # parent_index (root)
-            1, # indent_depth
-            joint_chains,
-            joint_names,
-            joint_order,
-            parent_order,
-            outputPosition,
-            outputRotation,
-            rotation_order,
-            base_indent
-        )
-        
-        f.write("}\n")
-        
-        
-        #
-        # Write motion data
-        #
-        
-        f.write("\nMOTION\n")
-        f.write(f"Frames: {frames}\n")
-        f.write(f"Frame Time: {frame_time:.6f}\n")
-        
-        rotation_order_index = [
-            ord(rotation_order[0]) - ord('X'),
-            ord(rotation_order[1]) - ord('X'),
-            ord(rotation_order[2]) - ord('X')
-        ]
-        
-        for f_idx in range(frames):
-            line = []
-            for i, j in enumerate(joint_order):
-                    
-                if j == 0 or outputPosition:
-                    if j == 0:
-                        pos = data_pos[f_idx, j]
-                    else:
-                        pos = data_pos[f_idx, j] - data_pos[f_idx, parent_order[i]]
-                    line.extend([f"{p:.6f}" for p in pos])
-                
-                if j == 0 or outputRotation:
-                    for rot_order in rotation_order_index:
-                        rot = data_rot[f_idx, j, rot_order]
-                        line.append(f"{rot:.6f}")
-                
-            if f_idx == 0:
-                print(f"{filename}: {len(line)} motion-data of {len(joint_order)} joints per frame (totally {frames} frames) are being exported.")
-                
-            f.write(" ".join(line) + "\n")
-
-
-
-# load positional motion-data (.npy) as list of ndarray(frames, joints, 3) and compute corresponding rotations
-def loadPositionalMotions(
-    filepath,
-    rotation_order="XYZ"
-    ):
-    
-    _, ext = os.path.splitext(filepath)
-    
-    if ext == ".npy":
-        
-        motion_data = np.load(filepath, allow_pickle=True)
-        if motion_data.size == 1:
-            motion_data = motion_data.item()
-        
-        # dict{"motion", "text", ..."}
-        if isinstance(motion_data, dict):
-            print(f"\"{filepath}\" is loaded. Following keys exist:")
-            for key in motion_data:
-                print(key)
-                
-            data_pos = motion_data["motion"]
-            print(f"Shape of motion-data: {motion_data.shape}") # ndarray(N, joints, 3, frames)
-            
-            ##
-            ## TODO: 次元の入れ替え
-            ##
-            
-        
-        # ndarray(N, frames, joints, 3)
-        elif isinstance(motion_data, np.ndarray):
-            print(f"\"{filepath}\" is loaded. The shape = {motion_data.shape}")
-            data_pos = motion_data
-            
-            
-        # others
-        else:
-            print(motion_data)
-            raise ValueError(f"{filepath} is invalid format.")
-            
-        
-    elif ext == ".npz":
-        raise NotImplementedError(f"Invalid file format: {filepath}")
-    
-    else:
-        raise ValueError(f"Invalid file format: {filepath}")
-    
-    
-    data_pos_list = []
-    data_rot_list = []
-    
-    for i in range(data_pos.shape[0]):
-        data_rot = pos2rot(data_pos[i], rotation_order)
-        data_pos_list.append(data_pos[i])
-        data_rot_list.append(data_rot)
-    
-    return data_pos_list, data_rot_list
-
-
-
 if __name__ == "__main__":
     
     data_pos_list, data_rot_list = loadPositionalMotions(
@@ -382,7 +259,7 @@ if __name__ == "__main__":
             f"test{i}.bvh",
             data_pos,
             data_rot_list[i],
-            motion_util.joint_names_smpl[:data_pos.shape[1]],
+            skeleton_util.joint_names_smpl[:data_pos.shape[1]],
             rotation_order = rotation_order_bvh,
             frame_time=1/30.0
         )

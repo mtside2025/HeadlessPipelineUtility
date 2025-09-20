@@ -18,7 +18,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import mpl_toolkits.mplot3d.axes3d as p3
 from textwrap import wrap
 import imageio
-import motion_util
+import skeleton_util
 
 def init(ax, limits):
     ax.set_xlim(-limits, limits)
