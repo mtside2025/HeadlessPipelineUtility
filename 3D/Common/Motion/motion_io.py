@@ -13,49 +13,130 @@ import numpy as np
 import pickle
 import motion_util
 import numpy as np
-
 from scipy.spatial.transform import Rotation as R
 
 
+#
+# convert posiotional data to global rotation data
+# input-data format: ndarray(joints, 3)
+#
+def computeGlobalRotations (
+    global_positions, # ndarray(joints, 3)
+    is_euler = False, # True: Euler, False: Quaternion
+    rotaton_order = "XYZ", # only for euler-angle
+    is_degree = True,      # only for euler-angle
+    frontal_direction = [0, 0, -1] # frontal direction of loaded skeleton
+    ):
+    
+    joints, _ = global_positions.shape
+    joint_chains = motion_util.getJointChains(joints)
+    
+    if is_euler:
+        global_rotations = np.zeros(global_positions.shape)
+    else:
+        global_rotations = np.zeros((global_positions.shape[0], 4)) # quaternion
+        global_rotations[:,3] = 1.0
+    
+    for chain in joint_chains:
+        for i in range(1, len(chain)):
+            joint_idx = chain[i]
+            parent_idx = chain[i-1]
+            pos        = global_positions[joint_idx, :]
+            parent_pos = global_positions[parent_idx, :]
+            vec        = pos - parent_pos
+            
+            # compute angle from frontal-direction
+            rot = R.align_vectors([vec], [frontal_direction])[0] # (target, source)
+            
+            if is_euler:
+                global_rotations[joint_idx, :] = rot.as_euler(rotation_order, degrees=is_degree)
+            else:
+                global_rotations[joint_idx, :] = rot.as_quat()
+            
+        
+    return global_rotations
+    
+
+#
+# compute rotation-differences between quaternion ndarrays
+# input-data format: ndarray(num, 4)
+#
+def computeRotationDifference(
+    quats_target,
+    quats_source,
+    is_euler = False, # True: Euler, False: Quaternion
+    rotation_order = "XYZ", # only for euler-angle
+    is_degree = True       # only for euler-angle
+    ):
+    
+    num = quats_target.shape[0]
+    assert(num == quats_source.shape[0])
+    
+    if is_euler:
+        output_delta = np.zeros((num, 3)) # output as euler
+    else:
+        output_delta = np.zeros((num, 4)) # output as quaternion
+        output_delta[:,3] = 1.0
+    
+    
+    for i in range(num):
+        # convert to rotation-object
+        rot_src = R.from_quat(quats_source[i])
+        rot_tgt = R.from_quat(quats_target[i])
+
+        # align source to target
+        delta_rot = rot_src.inv() * rot_tgt
+
+        # convert to rotation-angle
+        if is_euler:
+            output_delta[i] = delta_rot.as_euler(rotation_order, degrees=is_degree)
+        else:
+            output_delta[i] = delta_rot.as_quat()
+    
+    return output_delta
+    
+
+
+#
+# convert posiotional data to local rotation-euler data from the 1st frame pose
+# input-data format: ndarray(frames, joints, 3)
+#
 def pos2rot(
-    data_pos,               # ndarray(frames, joints, 3)
-    axis_vector = [0, 1, 0] # [0, 1, 0]: Y-up, [0, 0, 1]: Z-up
+    data_pos,                # ndarray(frames, joints, 3)
+    rotation_order="XYZ"
      ):
      
     frames, joints, _ = data_pos.shape
     joint_chains = motion_util.getJointChains(joints)
     
+    # compute global-rotation angles of the 1st frame
+    initial_global_rotations = computeGlobalRotations(data_pos[0,:,:]) # compute as quaternion
+    
+    
+    # compute local-rotation angles from the 1st frame
     data_rot = np.zeros(data_pos.shape)
-    
-    global_rotations = [np.eye(3) for _ in range(joints)]  # Initial global rotation for each joint
-    
-    for f in range(frames):
-        current_global_rotations = [np.eye(3) for _ in range(joints)]
+    for f in range(1, frames):
+        global_rotations = computeGlobalRotations(data_pos[f,:,:]) # compute as quaternion
+        data_rot[f,:,:] = computeRotationDifference(
+            global_rotations,
+            initial_global_rotations,
+            is_euler = True,
+            rotation_order = rotation_order,
+            is_degree = True
+            )
         
-        #for j in range(joints):
-        for chain in joint_chains:
-            for i in range(1, len(chain)):
-                j = chain[i]
-                parent = chain[i-1]
-
-                # Compute direction vector in world space
-                world_vec = data_pos[f, j] - data_pos[f, parent]
-                world_vec /= np.linalg.norm(world_vec)
-
-                # Transform the vector into the parent's local coordinate system
-                parent_global_rot = global_rotations[parent]
-                local_vec = np.dot(np.linalg.inv(parent_global_rot), world_vec)
-
-                # Compute rotation that aligns local_vec to the Y-axis
-                rot = R.align_vectors([local_vec], [axis_vector])[0]
-                euler = rot.as_euler('XYZ', degrees=True)
-                data_rot[f, j] = euler
-
-                # Update global rotation for this joint
-                current_global_rotations[j] = parent_global_rot @ rot.as_matrix()
-
-        global_rotations = current_global_rotations
-
+        """
+        debug_joint_index = 4
+        print("Local: (", end="")
+        for i, r in enumerate(data_rot[f, debug_joint_index, :]):
+            print(f"{r:.1f}", end="")
+            if i != 2:
+                print(",\t", end="")
+            
+        print(")")
+        """
+        
+        
     return data_rot
 
 
@@ -67,6 +148,7 @@ def _writeChildChains(
     joint_chains,
     joint_names,
     joint_order,
+    parent_order,
     outputPosition,
     outputRotation,
     rotation_order,
@@ -79,15 +161,17 @@ def _writeChildChains(
         
         for j in range(1, len(chain)):
             
-            joint_idx = chain[j]
+            joint_idx  = chain[j]
+            parent_idx = chain[j-1]
             joint_order.append(joint_idx)
+            parent_order.append(parent_idx)
             
             indent = base_indent * (indent_depth + j-1)
             file.write(f"{indent}JOINT {joint_names[joint_idx]}\n")
             file.write(f"{indent}{{\n")
             
             # set joint-position as OFFSET from 1st-frame
-            joint_pos = data_pos[0, joint_idx] - data_pos[0, 0]
+            joint_pos = data_pos[0, joint_idx] - data_pos[0, parent_idx]
             indent = base_indent * (indent_depth + j)
             file.write(f"{indent}OFFSET {joint_pos[0]} {joint_pos[1]} {joint_pos[2]}\n")
             
@@ -106,6 +190,7 @@ def _writeChildChains(
                 joint_chains[i+1:],
                 joint_names,
                 joint_order,
+                parent_order,
                 outputPosition,
                 outputRotation,
                 rotation_order,
@@ -136,9 +221,9 @@ def exportToBvh(
     data_pos,
     data_rot,
     joint_names,
+    rotation_order,
     outputPosition=False,
     outputRotation=True,
-    rotation_order="ZXY",
     frame_time=1/30.0,
     base_indent="    "
     ):
@@ -147,6 +232,8 @@ def exportToBvh(
     
     frames, joints, _ = data_pos.shape
     joint_chains = motion_util.getJointChains(joints)
+    
+    data_pos *= 100.0 # m -> cm
     
     with open(filename, 'w') as f:
         
@@ -166,6 +253,7 @@ def exportToBvh(
         
         # write hierarchy of each joint and save the order as list
         joint_order = [0]
+        parent_order = [-1]
         _writeChildChains(
             f,
             0, # parent_index (root)
@@ -173,6 +261,7 @@ def exportToBvh(
             joint_chains,
             joint_names,
             joint_order,
+            parent_order,
             outputPosition,
             outputRotation,
             rotation_order,
@@ -180,7 +269,6 @@ def exportToBvh(
         )
         
         f.write("}\n")
-        
         
         
         #
@@ -199,13 +287,13 @@ def exportToBvh(
         
         for f_idx in range(frames):
             line = []
-            for j in joint_order:
+            for i, j in enumerate(joint_order):
                     
                 if j == 0 or outputPosition:
                     if j == 0:
                         pos = data_pos[f_idx, j]
                     else:
-                        pos = data_pos[f_idx, j] - data_pos[f_idx, 0]
+                        pos = data_pos[f_idx, j] - data_pos[f_idx, parent_order[i]]
                     line.extend([f"{p:.6f}" for p in pos])
                 
                 if j == 0 or outputRotation:
@@ -222,7 +310,8 @@ def exportToBvh(
 
 # load positional motion-data (.npy) as list of ndarray(frames, joints, 3) and compute corresponding rotations
 def loadPositionalMotions(
-    filepath
+    filepath,
+    rotation_order="XYZ"
     ):
     
     _, ext = os.path.splitext(filepath)
@@ -270,7 +359,7 @@ def loadPositionalMotions(
     data_rot_list = []
     
     for i in range(data_pos.shape[0]):
-        data_rot = pos2rot(data_pos[i])
+        data_rot = pos2rot(data_pos[i], rotation_order)
         data_pos_list.append(data_pos[i])
         data_rot_list.append(data_rot)
     
@@ -285,11 +374,15 @@ if __name__ == "__main__":
         "motion_smpl_sample.npy"
     )
     
+    
+    rotation_order_bvh = "ZXY"
+    
     for i, data_pos in enumerate(data_pos_list):
         exportToBvh(
             f"test{i}.bvh",
             data_pos,
             data_rot_list[i],
             motion_util.joint_names_smpl[:data_pos.shape[1]],
+            rotation_order = rotation_order_bvh,
             frame_time=1/30.0
         )

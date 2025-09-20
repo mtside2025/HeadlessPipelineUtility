@@ -16,58 +16,58 @@ from scipy.spatial.transform import Rotation as R
 
 # https://meshcapade.wiki/SMPL#related-models-the-smpl-family
 joint_names_smpl = [
-    "pelvis",
-    "left_hip",
-    "right_hip",
-    "spine1",
-    "left_knee",
-    "right_knee",
-    "spine2",
-    "left_ankle",
-    "right_ankle",
-    "spine3",
-    "left_foot",
-    "right_foot",
-    "neck",
-    "left_collar",
-    "right_collar",
-    "head",
-    "left_shoulder",
-    "right_shoulder",
-    "left_elbow",
-    "right_elbow",
-    "left_wrist",
-    "right_wrist",
-    "left_hand",
-    "right_hand"
+    "pelvis",   # 0
+    "left_hip", # 1
+    "right_hip",    #2
+    "spine1",       #3
+    "left_knee",    #4
+    "right_knee",   #5
+    "spine2",       #6
+    "left_ankle",   #7
+    "right_ankle",  #8
+    "spine3",       #9
+    "left_foot",    #10
+    "right_foot",   #11
+    "neck",     #12
+    "left_collar",  #13
+    "right_collar", #14
+    "head",     #15
+    "left_shoulder",    #16
+    "right_shoulder",   #17
+    "left_elbow",   #18
+    "right_elbow",  #19
+    "left_wrist",   #20
+    "right_wrist",  #21
+    "left_hand",    #22
+    "right_hand"    #23
 ]
 
 
 joint_names_mixamo = [
-    "Hips",                # pelvis
-    "LeftUpLeg",           # left_hip
-    "RightUpLeg",          # right_hip
-    "Spine",               # spine1
-    "LeftLeg",             # left_knee
-    "RightLeg",            # right_knee
-    "Spine1",              # spine2
-    "LeftFoot",            # left_ankle
-    "RightFoot",           # right_ankle
-    "Spine2",              # spine3
-    "LeftToeBase",         # left_foot
-    "RightToeBase",        # right_foot
-    "Neck",                # neck
-    "LeftShoulder",        # left_collar
-    "RightShoulder",       # right_collar
-    "Head",                # head
-    "LeftArm",             # left_shoulder
-    "RightArm",            # right_shoulder
-    "LeftForeArm",         # left_elbow
-    "RightForeArm",        # right_elbow
-    "LeftHand",            # left_wrist
-    "RightHand",           # right_wrist
-    "LeftHandMiddle1",     # left_hand (representative finger-bone is chosen)
-    "RightHandMiddle1"     # right_hand
+    "Hips",                #  0: pelvis
+    "LeftUpLeg",           #  1: left_hip
+    "RightUpLeg",          #  2: right_hip
+    "Spine",               #  3: spine1
+    "LeftLeg",             #  4: left_knee
+    "RightLeg",            #  5: right_knee
+    "Spine1",              #  6: spine2
+    "LeftFoot",            #  7: left_ankle
+    "RightFoot",           #  8: right_ankle
+    "Spine2",              #  9: spine3
+    "LeftToeBase",         # 10: left_foot
+    "RightToeBase",        # 11: right_foot
+    "Neck",                # 12: neck
+    "LeftShoulder",        # 13: left_collar
+    "RightShoulder",       # 14: right_collar
+    "Head",                # 15: head
+    "LeftArm",             # 16: left_shoulder
+    "RightArm",            # 17: right_shoulder
+    "LeftForeArm",         # 18: left_elbow
+    "RightForeArm",        # 19: right_elbow
+    "LeftHand",            # 20: left_wrist
+    "RightHand",           # 21: right_wrist
+    "LeftHandMiddle1",     # 22: left_hand (representative finger-bone is chosen)
+    "RightHandMiddle1"     # 23: right_hand
 ]
 
 
@@ -116,52 +116,4 @@ def getJointChains(num_joints):
         
     return joint_chains
     
-
-
-
-#
-# convert posiotional data to global rotation data
-# input-data format: ndarray(frames, joints, 3)
-#
-def pos2rot (
-    data_pos,
-    axis_vector = [0, 1, 0], # [0, 1, 0]: Y-up, [0, 0, 1]: Z-up
-    is_local_rotation = False # to-local to be implemented
-    ):
-    
-    frames, joints, _ = data_pos.shape
-    joint_chains = getJointChains(joints)
-    
-    data_rot = np.zeros(data_pos.shape)
-    
-    for frame_idx in range(data_pos.shape[0]):
-        for chain in joint_chains:
-            for joint_idx in range(1, len(chain)):
-                
-                pos_xyz        = data_pos[frame_idx, joint_idx, :]
-                parent_pos_xyz = data_pos[frame_idx, joint_idx-1, :]
-                
-                direction = pos - parent_pos
-                reference = Vector(axis_vector)
-                
-                # compute difference from reference-direction
-                rotation_matrix = reference.rotation_difference(direction).to_matrix().to_4x4()
-                data_rot[frame_idx, joint_idx, :] = rotation_matrix.to_euler('XYZ')
-                
-                """
-                rot, _ = R.align_vectors([direction], [axis_vector])
-                data_rot[frame_idx, joint_idx, :] = rot.as_euler('XYZ', degrees=False)
-                """
-                
-                # update reference direction
-                if is_local_rotation:
-                    if joint_idx != 0:
-                        axis_vector = direction
-                    else:
-                        raise NotImplementedError("Axis-vector of root-joints of each chain must be considered.")
-            
-        
-    return data_rot
-    
-
 
