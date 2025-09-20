@@ -86,7 +86,9 @@ joint_names_mixamo = [
 # https://www.researchgate.net/figure/Layout-of-23-joints-in-the-SMPL-models_fig2_351179264
 #
 def getJointChains(num_joints):
-
+    
+    junction_nodes = []
+    
     if num_joints == 21:
         joint_chains = [
             [0, 11, 12, 13, 14, 15],
@@ -113,7 +115,11 @@ def getJointChains(num_joints):
         ]
     else:
         raise NotImplementedError(f"This joint-type (num_joints={num_joints}) is not implemented.")
-        
-    return joint_chains
+    
+    for chain in joint_chains:
+        if chain[0] not in junction_nodes:
+            junction_nodes.append(chain[0])
+    
+    return joint_chains, junction_nodes
     
 

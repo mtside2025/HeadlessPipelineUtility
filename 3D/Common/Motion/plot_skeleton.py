@@ -8,7 +8,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import os
 import torch 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +19,8 @@ import mpl_toolkits.mplot3d.axes3d as p3
 from textwrap import wrap
 import imageio
 import skeleton_util
+from np2bvh import loadPositionalMotions
+
 
 def init(ax, limits):
     ax.set_xlim(-limits, limits)
@@ -119,17 +121,22 @@ def update(index, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, c
         return arr
 
 
-def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
+def plot_3d_motion(
+    data_pos,
+    out_name,
+    title,
+    figsize=(10, 10),
+    fps=120,
+    radius=4
+    ):
+    
     matplotlib.use('Agg')
     
+    data = data_pos.copy().reshape(len(data_pos), -1, 3)
     
-    joints, out_name, title = args
+    nb_joints = data_pos.shape[1]
     
-    data = joints.copy().reshape(len(joints), -1, 3)
-    
-    nb_joints = joints.shape[1]
-    
-    kinetic_chain = motion_util.getJointChains(nb_joints)
+    kinetic_chain = skeleton_util.getJointChains(nb_joints)
     
     
     limits = 1000 if nb_joints == 21 else 2
@@ -156,23 +163,36 @@ def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
     return torch.from_numpy(out)
 
 
-def draw_to_batch(smpl_joints_batch, title_batch=None, outname=None) : 
+def plotPositionalMotions(
+    data_pos_list,
+    fps,
+    titles = None,
+    output_dir = None
+    ):
     
-    batch_size = len(smpl_joints_batch)
+    batch_size = len(data_pos_list)
     out = []
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
     for i in range(batch_size) : 
+        
         out.append(
             plot_3d_motion(
-                [
-                    smpl_joints_batch[i],
-                    None,
-                    title_batch[i] if title_batch is not None else None
-                ]
+                data_pos_list[i],
+                None,
+                titles[i] if titles is not None else None
             )
         )
         
-        if outname is not None:
-            imageio.mimsave(outname[i], np.array(out[-1]), fps=20)
+        output_animgif_path = output_dir + f"/{i:03d}.gif"
+        
+        imageio.mimsave(
+            output_animgif_path,
+            np.array(out[-1]),
+            fps = fps
+            )
+                
     out = torch.stack(out, axis=0)
     return out
     
@@ -180,13 +200,27 @@ def draw_to_batch(smpl_joints_batch, title_batch=None, outname=None) :
 
 if __name__ == "__main__":
     
-    motion_name = "motion_smpl_sample"
+    #input_np_path = "samples/motion_smpl_sample_T2M-GPT.npy"
+    input_np_path = "samples/motion_smpl_sample_LoRA-MDM.npy"
     
-    motions = np.load(f"{motion_name}.npy")
+    # load ndarray from file
+    data_pos_list, data_rot_list = loadPositionalMotions(input_np_path)
     
-    draw_to_batch(
-        motions,
-        title_batch = ["a person is walking"],
-        outname = [f"{motion_name}.gif"]
+    # load text-list from text-file
+    text_file_path = os.path.splitext(input_np_path)[0] + ".txt"
+    if os.path.exists(text_file_path):
+        with open(text_file_path, 'r', encoding='utf-8') as f:
+            texts = [line.strip() for line in f]
+    else:
+        texts = None
+    
+    name = os.path.splitext(os.path.basename(input_np_path))[0]
+    output_dir = f"results/{name}"
+    
+    plotPositionalMotions(
+        data_pos_list,
+        fps = 20,
+        titles = texts,
+        output_dir = output_dir
         )
 

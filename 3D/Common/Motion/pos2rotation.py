@@ -67,7 +67,7 @@ def computeGlobalRotations (
     ):
     
     joints, _ = global_positions.shape
-    joint_chains = skeleton_util.getJointChains(joints)
+    joint_chains, junction_nodes = skeleton_util.getJointChains(joints)
     
     if is_euler:
         global_rotations = np.zeros(global_positions.shape)
@@ -76,12 +76,15 @@ def computeGlobalRotations (
         global_rotations[:,3] = 1.0
     
     for chain in joint_chains:
-        for i in range(1, len(chain)):
+        for i in range(1, len(chain)-1):
             joint_idx = chain[i]
-            parent_idx = chain[i-1]
-            pos        = global_positions[joint_idx, :]
-            parent_pos = global_positions[parent_idx, :]
-            vec        = pos - parent_pos
+            if joint_idx in junction_nodes: # rotation of branched-bones cannot be estimated
+                continue
+            
+            child_idx = chain[i+1]
+            joint_pos = global_positions[joint_idx, :]
+            child_pos = global_positions[child_idx, :]
+            vec       = child_pos - joint_pos
             
             # compute angle from frontal-direction
             rot = R.align_vectors([vec], [frontal_direction])[0] # (target, source)
@@ -118,7 +121,7 @@ def computeLocalRotations (
     
     
     joints, _ = global_positions.shape
-    joint_chains = skeleton_util.getJointChains(joints)
+    joint_chains, junction_nodes = skeleton_util.getJointChains(joints)
     
     if is_euler:
         local_rotations = np.zeros(global_positions.shape)
@@ -127,20 +130,23 @@ def computeLocalRotations (
         local_rotations[:,3] = 1.0
     
     for chain in joint_chains:
-        for i in range(1, len(chain)):
-            joint_idx = chain[i]
-            parent_idx = chain[i-1]
+        for i in range(1, len(chain)-1):
+            bone_idx = chain[i]
+            if bone_idx in junction_nodes: # rotation of branched-bones cannot be estimated
+                continue
+                
+            parent_bone_idx = chain[i-1]
             
-            rot        = R.from_quat(global_rotations[joint_idx])
-            rot_parent = R.from_quat(global_rotations[parent_idx])
+            rot_bone        = R.from_quat(global_rotations[bone_idx])
+            rot_parent_bone = R.from_quat(global_rotations[parent_bone_idx])
             
             # compute angle-difference
-            delta_rot = rot_parent.inv() * rot
+            delta_rot = rot_parent_bone.inv() * rot_bone
             
             if is_euler:
-                local_rotations[joint_idx, :] = delta_rot.as_euler(rotation_order, degrees=is_degree)
+                local_rotations[bone_idx, :] = delta_rot.as_euler(rotation_order, degrees=is_degree)
             else:
-                local_rotations[joint_idx, :] = delta_rot.as_quat()
+                local_rotations[bone_idx, :] = delta_rot.as_quat()
             
         
     return local_rotations
@@ -158,7 +164,7 @@ def pos2rot(
      ):
      
     frames, joints, _ = data_pos.shape
-    joint_chains = skeleton_util.getJointChains(joints)
+    joint_chains, junction_nodes = skeleton_util.getJointChains(joints)
     
     # compute global-rotation angles of the 1st frame
     initial_rotations = computeLocalRotations(data_pos[0,:,:]) # compute as quaternion
@@ -178,7 +184,7 @@ def pos2rot(
         
         """
         debug_joint_index = 4
-        print("Local: (", end="")
+        print(f"Frame-{f+1:03d}: (", end="")
         for i, r in enumerate(data_rot[f, debug_joint_index, :]):
             print(f"{r:.1f}", end="")
             if i != 2:

@@ -129,11 +129,14 @@ def retarget(
     
     
     finally:
+        pass
+        """
         bpy.ops.object.mode_set(mode='OBJECT')
         
         # recover original scene and remove temporary one
         bpy.context.window.scene = original_scene
         bpy.data.scenes.remove(temp_scene)
+        """
 
 
 def retarget_dir(
@@ -180,9 +183,14 @@ def retarget_dir(
 
 if __name__ == "__main__":
     
+    """
     input_dir = "G:/3d/animation/michael_bvh"
     output_dir = "G:/3d/animation/michael_bvh_smplx"
     rename_json_path = "G:/3d/animation/michael_bvh/conversion.json"
+    """
+    input_dir = "../Common/Motion"
+    output_dir = "./tmp"
+    rename_json_path = "../Common/Motion/retarget_table/smpl_to_mixamo.json"
     
     retarget_dir(
         input_dir,

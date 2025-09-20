@@ -18,7 +18,7 @@ from mathutils import Matrix, Vector, Quaternion, Euler
 import sys
 sys.path.append("../Common/Motion")
 import motion_io
-import motion_util
+import skeleton_util
 
 
 #
