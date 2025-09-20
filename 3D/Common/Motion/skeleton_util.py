@@ -99,19 +99,19 @@ def getJointChains(num_joints):
         ]
     elif num_joints == 22:
         joint_chains = [
-            [0, 2, 5, 8, 11],       # right-lower-body
             [0, 1, 4, 7, 10],       # left-lower-body
+            [0, 2, 5, 8, 11],       # right-lower-body
             [0, 3, 6, 9, 12, 15],   # body-axis
+            [9, 13, 16, 18, 20],    # left-upper-body
             [9, 14, 17, 19, 21],    # right-upper-body
-            [9, 13, 16, 18, 20]     # left-upper-body
         ]
     elif num_joints == 24:
         joint_chains = [
-            [0, 2, 5, 8, 11],       # right-lower-body
             [0, 1, 4, 7, 10],       # left-lower-body
+            [0, 2, 5, 8, 11],       # right-lower-body
             [0, 3, 6, 9, 12, 15],   # body-axis
-            [9, 14, 17, 19, 21, 23],    # right-upper-body
-            [9, 13, 16, 18, 20, 22]     # left-upper-body
+            [9, 13, 16, 18, 20, 22],   # left-upper-body
+            [9, 14, 17, 19, 21, 23]    # right-upper-body
         ]
     else:
         raise NotImplementedError(f"This joint-type (num_joints={num_joints}) is not implemented.")

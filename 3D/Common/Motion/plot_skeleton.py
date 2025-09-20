@@ -43,8 +43,8 @@ def plot_xzPlane(ax, minx, maxx, miny, minz, maxz):
     ax.add_collection3d(xz_plane)
     
 
-
-def update(index, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, colors, data, out_name):
+# plot single-frame
+def update(index, trajec, joint_chains, nb_joints, title, limits, MINS, MAXS, colors, data, out_name):
 
     fig = plt.figure(figsize=(480/96., 320/96.), dpi=96) if nb_joints == 21 else plt.figure(figsize=(10, 10), dpi=96)
     if title is not None :
@@ -84,7 +84,7 @@ def update(index, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, c
             )
     #             ax = plot_xzPlane(ax, MINS[0], MAXS[0], 0, MINS[2], MAXS[2])
 
-    for i, (chain, color) in enumerate(zip(kinetic_chain, colors)):
+    for i, (chain, color) in enumerate(zip(joint_chains, colors)):
         #             print(color)
         if i < 5:
             linewidth = 4.0
@@ -114,8 +114,10 @@ def update(index, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, c
         fig.savefig(io_buf, format='raw', dpi=96)
         io_buf.seek(0)
         # print(fig.bbox.bounds)
-        arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
-                            newshape=(int(fig.bbox.bounds[3]), int(fig.bbox.bounds[2]), -1))
+        arr = np.reshape(
+            np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+            (int(fig.bbox.bounds[3]), int(fig.bbox.bounds[2]), -1)
+            )
         io_buf.close()
         plt.close()
         return arr
@@ -132,11 +134,11 @@ def plot_3d_motion(
     
     matplotlib.use('Agg')
     
-    data = data_pos.copy().reshape(len(data_pos), -1, 3)
+    data = data_pos #.copy().reshape(len(data_pos), -1, 3)
     
     nb_joints = data_pos.shape[1]
     
-    kinetic_chain = skeleton_util.getJointChains(nb_joints)
+    joint_chains, junction_nodes = skeleton_util.getJointChains(nb_joints)
     
     
     limits = 1000 if nb_joints == 21 else 2
@@ -158,7 +160,7 @@ def plot_3d_motion(
 
     out = []
     for i in range(frame_number) : 
-        out.append(update(i, trajec, kinetic_chain, nb_joints, title, limits, MINS, MAXS, colors, data, out_name))
+        out.append(update(i, trajec, joint_chains, nb_joints, title, limits, MINS, MAXS, colors, data, out_name))
     out = np.stack(out, axis=0)
     return torch.from_numpy(out)
 
@@ -177,6 +179,9 @@ def plotPositionalMotions(
     
     for i in range(batch_size) : 
         
+        print(f"[{i+1}/{batch_size}]")
+        
+        print("Plotting...")
         out.append(
             plot_3d_motion(
                 data_pos_list[i],
@@ -186,13 +191,16 @@ def plotPositionalMotions(
         )
         
         output_animgif_path = output_dir + f"/{i:03d}.gif"
+        print("Saving as animation-gif \"{output_animgif_path}\"...")
         
         imageio.mimsave(
             output_animgif_path,
-            np.array(out[-1]),
+            np.asarray(out[-1]),
             fps = fps
             )
-                
+            
+        
+    print("Done")
     out = torch.stack(out, axis=0)
     return out
     
