@@ -89,6 +89,7 @@ def exportToBvh(
     outputPosition,
     outputRotation,
     frame_time,
+    is_left_coordinate,
     base_indent="    "
     ):
     
@@ -130,7 +131,8 @@ def exportToBvh(
             outputPosition,
             outputRotation,
             rotation_order,
-            base_indent
+            base_indent,
+            is_left_coordinate
         )
         
         f.write("}\n")
@@ -189,7 +191,8 @@ def _writeChildChains(
     outputPosition,
     outputRotation,
     rotation_order,
-    base_indent
+    base_indent,
+    is_left_coordinate
 ):
     for i, chain in enumerate(joint_chains):
         
@@ -209,6 +212,8 @@ def _writeChildChains(
             
             # set joint-position as OFFSET from 1st-frame
             joint_pos = initial_global_positions[joint_idx] - initial_global_positions[parent_idx]
+            if is_left_coordinate:
+                joint_pos[...,0] *= -1
             indent = base_indent * (indent_depth + j)
             file.write(f"{indent}OFFSET {joint_pos[0]} {joint_pos[1]} {joint_pos[2]}\n")
             
@@ -232,7 +237,8 @@ def _writeChildChains(
                 outputPosition,
                 outputRotation,
                 rotation_order,
-                base_indent
+                base_indent,
+                is_left_coordinate
             )
             
         
@@ -303,6 +309,9 @@ if __name__ == "__main__":
     input_np_path = "samples/motion_smpl_sample_LoRA-MDM.npy"
     #input_np_path = "D:/Project/Motion/LoRA-MDM/save/out/results.npy"
     
+    #is_left_coordinate = False # T2M-GPT
+    is_left_coordinate = True # LoRA-MDM
+    
     output_bvh_dir_path = "results/" + os.path.splitext(os.path.basename(input_np_path))[0]
     
     np2bvh(
@@ -311,7 +320,8 @@ if __name__ == "__main__":
         fps,
         outputPosition = False,
         outputRotation = True,
-        output_rotation_order = rotation_order
+        output_rotation_order = rotation_order,
+        is_left_coordinate = is_left_coordinate
     )
     
     
